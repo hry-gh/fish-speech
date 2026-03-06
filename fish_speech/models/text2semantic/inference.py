@@ -10,10 +10,14 @@ from typing import Callable, Literal, Optional, Tuple, Union
 import click
 import numpy as np
 import torch
+import torch._dynamo
 import torch._inductor.config
 from loguru import logger
 from tqdm import tqdm
 from transformers import AutoTokenizer
+
+# Enable dynamic output shape ops for bitsandbytes compatibility with torch.compile
+torch._dynamo.config.capture_dynamic_output_shape_ops = True
 
 from fish_speech.content_sequence import (
     ContentSequence,
