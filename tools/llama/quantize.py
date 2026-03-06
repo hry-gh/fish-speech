@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from fish_speech.models.text2semantic.inference import load_model
+from fish_speech.models.text2semantic.inference import init_model as load_model
 from fish_speech.models.text2semantic.llama import find_multiple
 
 ##### Quantization Primitives ######
@@ -234,6 +234,63 @@ class WeightOnlyInt8Linear(torch.nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, self.weight.to(dtype=input.dtype)) * self.scales
+
+
+##### bitsandbytes INT8 quantization (actual INT8 compute) ######
+
+
+def replace_linear_with_bnb_int8(module, skip_modules=None):
+    """
+    Replace nn.Linear layers with bitsandbytes Linear8bitLt for actual INT8 compute.
+    
+    Args:
+        module: The model to modify
+        skip_modules: List of module names to skip (e.g., ['lm_head', 'embeddings'])
+    """
+    import bitsandbytes as bnb
+    
+    if skip_modules is None:
+        skip_modules = []
+    
+    for name, child in module.named_children():
+        if name in skip_modules:
+            continue
+            
+        if isinstance(child, nn.Linear):
+            # Create bitsandbytes Linear8bitLt layer
+            has_bias = child.bias is not None
+            new_layer = bnb.nn.Linear8bitLt(
+                child.in_features,
+                child.out_features,
+                bias=has_bias,
+                has_fp16_weights=False,  # Use INT8 weights
+                threshold=6.0,  # Threshold for outlier detection
+            )
+            # Copy weights - they'll be quantized on first forward pass
+            new_layer.weight = bnb.nn.Int8Params(
+                child.weight.data,
+                requires_grad=False,
+                has_fp16_weights=False,
+            )
+            if has_bias:
+                new_layer.bias = child.bias
+            
+            setattr(module, name, new_layer)
+        else:
+            replace_linear_with_bnb_int8(child, skip_modules)
+
+
+class BitsAndBytesInt8Handler:
+    """Handler for bitsandbytes INT8 quantization with actual INT8 compute."""
+    
+    def __init__(self, mod, skip_modules=None):
+        self.mod = mod
+        self.skip_modules = skip_modules or ['embeddings', 'codebook_embeddings', 'fast_embeddings']
+    
+    def convert_for_runtime(self):
+        """Convert model to use bitsandbytes INT8 layers."""
+        replace_linear_with_bnb_int8(self.mod, self.skip_modules)
+        return self.mod
 
 
 ##### weight only int4 per channel groupwise quantized code ######

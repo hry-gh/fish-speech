@@ -350,11 +350,24 @@ def generate(
     return seq
 
 
-def init_model(checkpoint_path, device, precision, compile=False):
+def init_model(checkpoint_path, device, precision, compile=False, int8=False):
     model = DualARTransformer.from_pretrained(checkpoint_path, load_weights=True)
 
     model = model.to(device=device, dtype=precision)
     logger.info(f"Restored model from checkpoint")
+
+    # Apply bitsandbytes INT8 quantization if requested
+    if int8:
+        try:
+            from tools.llama.quantize import BitsAndBytesInt8Handler
+            logger.info("Applying bitsandbytes INT8 quantization...")
+            int8_handler = BitsAndBytesInt8Handler(model)
+            model = int8_handler.convert_for_runtime()
+            logger.info("bitsandbytes INT8 quantization applied successfully")
+        except ImportError as e:
+            logger.error(f"Failed to import bitsandbytes: {e}")
+            logger.error("Install with: pip install bitsandbytes")
+            raise
 
     if isinstance(model, DualARTransformer):
         decode_one_token = decode_one_token_ar
@@ -532,13 +545,14 @@ def launch_thread_safe_queue(
     device,
     precision,
     compile: bool = False,
+    int8: bool = False,
 ):
     input_queue = queue.Queue()
     init_event = threading.Event()
 
     def worker():
         model, decode_one_token = init_model(
-            checkpoint_path, device, precision, compile=compile
+            checkpoint_path, device, precision, compile=compile, int8=int8
         )
         with torch.device(device):
             model.setup_caches(

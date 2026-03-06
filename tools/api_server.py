@@ -67,7 +67,13 @@ class API(ExceptionHandler):
                 Exception: self.other_exception_handler,
             },
             factory_class=FactoryClass(http=MsgPackRequest),
-            cors_config=CORSConfig(),
+            cors_config=CORSConfig(
+                allow_origins=[re.compile(".*")],  # Allow all origins
+                allow_methods=["*"],
+                allow_headers=["*"],
+                allow_credentials=True,
+                max_age=86400,
+            ),
         )
 
         # Add the state variables
@@ -88,6 +94,7 @@ class API(ExceptionHandler):
             llama_checkpoint_path=self.args.llama_checkpoint_path,
             decoder_checkpoint_path=self.args.decoder_checkpoint_path,
             decoder_config_name=self.args.decoder_config_name,
+            int8=self.args.int8,
         )
 
         logger.info(f"Startup done, listening server at http://{self.args.listen}")
